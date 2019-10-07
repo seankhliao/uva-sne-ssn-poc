@@ -1,65 +1,46 @@
 package main
 
 import (
-	"fmt"
-	"os"
+	"log"
 
-	"github.com/rs/zerolog"
-	"github.com/rs/zerolog/log"
-	"golang.org/x/crypto/ssh/terminal"
-
-	"github.com/paypal/gatt"
-	"github.com/paypal/gatt/examples/option"
+	"github.com/muka/go-bluetooth/api"
+	"github.com/muka/go-bluetooth/bluez/profile/adapter"
+	"github.com/muka/go-bluetooth/bluez/profile/device"
 )
 
-func init() {
-	// log format, controlled by LOGFMT
-	logfmt := os.Getenv("LOGFMT")
-	if logfmt != "json" {
-		logfmt = "text"
-		log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stdout, NoColor: !terminal.IsTerminal(int(os.Stdout.Fd()))})
-	}
-	log.Info().Str("FMT", logfmt).Msg("log format")
-
-	// log level, controlled by LOGLVL
-	level, err := zerolog.ParseLevel(os.Getenv("LOGLVL"))
-	if err != nil || level == zerolog.NoLevel {
-		level = zerolog.InfoLevel
-	}
-	log.Info().Str("LOGLVL", level.String()).Msg("log level")
-	zerolog.SetGlobalLevel(level)
-}
-
 func main() {
-	//
-	d, err := gatt.NewDevice(option.DefaultClientOptions...)
+	defer api.Exit()
+
+	a, err := adapter.GetDefaultAdapter()
 	if err != nil {
-		log.Fatal().Err(err).Msg("gatt.NewDevice")
+		log.Fatal(err)
 	}
 
-	// Register handlers.
-	d.Handle(gatt.PeripheralDiscovered(onPeriphDiscovered))
-	d.Init(onStateChanged)
+	a.FlushDevices()
+
+	discovery, cancel, err := api.Discover(a, nil)
+	if err != nil {
+		log.Fatal("discover: ", err)
+	}
+	defer cancel()
+
+	go func() {
+		for ev := range discovery {
+			if ev.Type == adapter.DeviceRemoved {
+				continue
+			}
+
+			dev, err := device.NewDevice1(ev.Path)
+			if err != nil {
+				log.Println("newdevice: ", err)
+				continue
+			}
+			if dev == nil {
+				log.Println("dev nil", err)
+				continue
+			}
+
+		}
+	}()
 	select {}
-}
-func onStateChanged(d gatt.Device, s gatt.State) {
-	fmt.Println("State:", s)
-	switch s {
-	case gatt.StatePoweredOn:
-		fmt.Println("scanning...")
-		d.Scan([]gatt.UUID{}, false)
-		return
-	default:
-		d.StopScanning()
-	}
-}
-
-func onPeriphDiscovered(p gatt.Peripheral, a *gatt.Advertisement, rssi int) {
-	// if p.ID() == "D8:68:C3:8C:78:CE" || p.ID() == "c0:ee:fb:ff:33:cf" {
-	fmt.Printf("\nPeripheral ID:%s, NAME:(%s)\n", p.ID(), p.Name())
-	fmt.Println("  Local Name        =", a.LocalName)
-	fmt.Println("  TX Power Level    =", a.TxPowerLevel)
-	fmt.Println("  Manufacturer Data =", a.ManufacturerData)
-	fmt.Println("  Service Data      =", a.ServiceData)
-	// }
 }
